@@ -171,6 +171,12 @@ export default function Room() {
       initiator: true,
       trickle: false,
       stream,
+      config: {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:global.stun.twilio.com:3478" },
+        ],
+      },
     });
 
     peer.on("signal", (signal) => {
@@ -201,6 +207,12 @@ export default function Room() {
       initiator: false,
       trickle: false,
       stream,
+      config: {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:global.stun.twilio.com:3478" },
+        ],
+      },
     });
 
     peer.on("signal", (signal) => {
@@ -264,7 +276,7 @@ export default function Room() {
                     <p className="mb-2 font-bold text-gray-400">To fix this in Opera/Chrome:</p>
                     <ol className="list-decimal pl-5 space-y-2">
                         <li>Go to <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> (or opera://...)</li>
-                        <li>Enable the "Insecure origins treated as secure" flag.</li>
+                        <li>Enable the &quot;Insecure origins treated as secure&quot; flag.</li>
                         <li>Add your IP address to the text box (e.g., <code>http://192.168.1.5:3000</code>).</li>
                         <li>Relaunch the browser.</li>
                     </ol>
