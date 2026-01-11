@@ -1,0 +1,33 @@
+# deploy.yml
+name: Build & Push Docker
+
+on:
+  push:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build & Push
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            TAG=latest
+          else
+            TAG=dev
+          fi
+
+          docker build \
+            -t ghcr.io/happy-fox-devs/meets:$TAG .
+
+          docker push ghcr.io/happy-fox-devs/meets:$TAG
