@@ -16,7 +16,7 @@ RUN corepack enable
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm build
+RUN npm run build
 
 # --- Runner ---
 FROM base AS runner
