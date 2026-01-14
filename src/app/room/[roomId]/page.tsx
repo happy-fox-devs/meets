@@ -59,6 +59,7 @@ export default function Room() {
   const [showChat, setShowChat] = useState(false);
   const [muted, setMuted] = useState(false);
   const [videoOff, setVideoOff] = useState(false);
+  const [restartingMode, setRestartingMode] = useState<'audio' | 'video' | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const userVideo = useRef<HTMLVideoElement>(null);
@@ -169,6 +170,150 @@ export default function Room() {
         peersRef.current.forEach(p => p.peer.destroy());
     };
   }, [roomId, userName, router]);
+
+  // Audio & Video Activity Monitor & Auto-Restart
+  useEffect(() => {
+    if (!stream || restartingMode) return;
+    
+    // Audio Context Setup
+    let audioContext: AudioContext;
+    let analyser: AnalyserNode;
+    let dataArray: Uint8Array;
+    let bufferLength: number;
+    
+    // Only set up audio monitoring if not muted
+    if (!muted) {
+        try {
+            audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            const microphone = audioContext.createMediaStreamSource(stream);
+            microphone.connect(analyser);
+            analyser.fftSize = 256;
+            bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+        } catch (e) {
+            console.error("Failed to initialize audio context", e);
+        }
+    }
+
+    let silenceStart = Date.now();
+    const SILENCE_THRESHOLD = 10; 
+    const SILENCE_DURATION = 10000; 
+
+    // Video State Monitoring
+    let videoCheckInterval: NodeJS.Timeout;
+
+    const checkMediaHealth = () => {
+       if (restartingMode) return;
+       
+       // 1. Check Audio
+       if (!muted && analyser && dataArray) {
+           analyser.getByteFrequencyData(dataArray as any);
+           let sum = 0;
+           for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
+           const average = sum / bufferLength;
+
+           if (average < SILENCE_THRESHOLD) {
+             if (Date.now() - silenceStart > SILENCE_DURATION) {
+                 console.warn("Audio silence detected for 10s. Restarting audio...");
+                 restartMedia('audio');
+                 silenceStart = Date.now();
+                 return;
+             }
+           } else {
+             silenceStart = Date.now();
+           }
+       }
+
+       // 2. Check Video
+       if (!videoOff && stream) {
+           const videoTrack = stream.getVideoTracks()[0];
+           if (videoTrack) {
+               // Check if track is unexpectedly ended or muted
+               if (videoTrack.readyState === 'ended' || videoTrack.muted) {
+                   console.warn("Video track ended or muted unexpectedly. Restarting video...", videoTrack.readyState, videoTrack.muted);
+                   restartMedia('video');
+                   return;
+               }
+           }
+       }
+
+       requestAnimationFrame(checkMediaHealth);
+    };
+
+    const animationId = requestAnimationFrame(checkMediaHealth);
+
+    return () => {
+      cancelAnimationFrame(animationId);
+      if(audioContext && audioContext.state !== 'closed') audioContext.close();
+    };
+  }, [stream, muted, videoOff, restartingMode]);
+
+  const restartMedia = async (type: 'audio' | 'video') => {
+      if (restartingMode || !streamRef.current) return;
+      setRestartingMode(type);
+
+      try {
+          const oldTracks = type === 'audio' 
+            ? streamRef.current.getAudioTracks() 
+            : streamRef.current.getVideoTracks();
+          
+          oldTracks.forEach(t => t.stop());
+
+          // Get new stream logic
+          // Note: We request BOTH if possible to ensure we get a fresh coherent stream, 
+          // but typically we just need the specific track. 
+          // Requesting just one might be faster/simpler.
+          const constraints = type === 'audio' ? { audio: true } : { video: true };
+          const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+          
+          const newTrack = type === 'audio' 
+            ? newStream.getAudioTracks()[0] 
+            : newStream.getVideoTracks()[0];
+
+          // Replace in local stream
+          const currentStream = streamRef.current;
+          if (type === 'audio') {
+              const old = currentStream.getAudioTracks()[0];
+              if (old) currentStream.removeTrack(old);
+              currentStream.addTrack(newTrack);
+          } else {
+              const old = currentStream.getVideoTracks()[0];
+              if (old) currentStream.removeTrack(old);
+              currentStream.addTrack(newTrack);
+              
+              // Force local video element update if video changed
+              if (userVideo.current) {
+                  userVideo.current.srcObject = currentStream;
+                  // Important: Trigger play again
+                  userVideo.current.play().catch(e => console.error("Error playing resized video", e));
+              }
+          }
+          
+          // Replace in all peer connections
+          await Promise.all(peersRef.current.map(async (peerObj) => {
+              if (peerObj.peer && !peerObj.peer.destroyed) {
+                  try {
+                      const oldTrack = oldTracks[0]; // The one we stopped
+                      // We need to pass the stream as the 3rd arg to replaceTrack in some versions of simple-peer/webrtc,
+                      // but simplest is replaceTrack(old, new, stream)
+                      await peerObj.peer.replaceTrack(oldTrack, newTrack, currentStream);
+                  } catch (e) {
+                      console.error(`Error replacing ${type} track for peer ${peerObj.peerId}`, e);
+                  }
+              }
+          }));
+
+      } catch (err) {
+          console.error(`Failed to restart ${type}:`, err);
+          // Only show fatal error if it's audio, video we might just let slide or show toast
+          if (type === 'audio') {
+             setError("Microphone stopped working and could not be restarted.");
+          }
+      } finally {
+          setRestartingMode(null);
+      }
+  };
 
   function createPeer(userToSignal: string, callerID: string, stream: MediaStream) {
     const peer = new SimplePeer({
@@ -303,6 +448,12 @@ export default function Room() {
 
   return (
     <div className="flex h-screen bg-[#202124] overflow-hidden text-white font-sans">
+      {restartingMode && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-yellow-500/90 text-black px-4 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 animate-pulse">
+              {restartingMode === 'audio' ? <MicOff size={18} /> : <VideoOff size={18} />}
+              <span>Restarting {restartingMode === 'audio' ? 'Audio' : 'Video'} Service...</span>
+          </div>
+      )}
       {/* Main Video Area */}
       <div className={`flex-1 flex flex-col p-4 transition-all duration-300 ${showChat ? 'mr-0' : 'mr-0'}`}>
         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
