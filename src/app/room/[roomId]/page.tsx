@@ -26,11 +26,15 @@ const Video = ({ stream, userName }: { stream?: MediaStream; userName?: string }
   useEffect(() => {
     if (ref.current && stream) {
       ref.current.srcObject = stream;
+      // Explicitly play to enable video on mobile browsers
+      ref.current.play().catch((err) => {
+          console.error("Error playing video:", err);
+      });
     }
   }, [stream]);
 
   return (
-    <div className="relative w-full h-full bg-black rounded-xl overflow-hidden shadow-lg border border-[#3c4043]">
+    <div onClick={() => ref.current?.play()} className="relative w-full h-full bg-black rounded-xl overflow-hidden shadow-lg border border-[#3c4043]">
       <video ref={ref} autoPlay playsInline className="w-full h-full object-cover" />
       <div className="absolute bottom-4 left-4 bg-black/60 px-3 py-1 rounded-full text-white text-sm font-medium backdrop-blur-md">
         {userName || "Participant"}
@@ -169,7 +173,7 @@ export default function Room() {
   function createPeer(userToSignal: string, callerID: string, stream: MediaStream) {
     const peer = new SimplePeer({
       initiator: true,
-      trickle: false,
+      trickle: true,
       stream,
       config: {
         iceServers: [
@@ -180,7 +184,11 @@ export default function Room() {
     });
 
     peer.on("signal", (signal) => {
-      socketRef.current?.emit("offer", { offer: signal, to: userToSignal });
+      if ('candidate' in signal) {
+        socketRef.current?.emit("ice-candidate", { candidate: signal, to: userToSignal });
+      } else {
+        socketRef.current?.emit("offer", { offer: signal, to: userToSignal });
+      }
     });
     
     peer.on("error", (err) => {
@@ -205,7 +213,7 @@ export default function Room() {
   function addPeer(incomingSignal: SignalData, callerID: string, stream: MediaStream) {
     const peer = new SimplePeer({
       initiator: false,
-      trickle: false,
+      trickle: true,
       stream,
       config: {
         iceServers: [
@@ -216,7 +224,11 @@ export default function Room() {
     });
 
     peer.on("signal", (signal) => {
-      socketRef.current?.emit("answer", { answer: signal, to: callerID });
+      if ('candidate' in signal) {
+        socketRef.current?.emit("ice-candidate", { candidate: signal, to: callerID });
+      } else {
+        socketRef.current?.emit("answer", { answer: signal, to: callerID });
+      }
     });
     
     peer.on("error", (err) => {
