@@ -8,7 +8,7 @@ const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
-const WHITELIST = ["admin", "user1", "user2", "alice", "bob"]; // In a real app, this would be a DB
+// Authorization is now handled dynamically via Calendar Service API
 
 app.prepare().then(() => {
   const server = express();
@@ -26,9 +26,29 @@ app.prepare().then(() => {
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
-    socket.on("join-room", (roomId, userId, userName) => {
-      if (!WHITELIST.includes(userName)) {
-        socket.emit("error", "User not whitelisted");
+    socket.on("join-room", async (roomId, userId, userName) => {
+      // Chain of Responsibility Handler 1: Basic validation
+      if (!userId || !userName) {
+        socket.emit("error", "Invalid user details");
+        return;
+      }
+
+      // Chain of Responsibility Handler 2: Calendar Service Authorization
+      try {
+        // Internal HTTP call to calendar-service (assuming it runs on 8080)
+        const response = await fetch(`http://localhost:8080/api/v1/academic/meets/authorize?userId=${userId}&roomId=${roomId}`);
+        if (!response.ok) {
+           throw new Error("Authorization HTTP request failed");
+        }
+        
+        const isAuthorized = await response.json();
+        if (!isAuthorized) {
+          socket.emit("error", "User not authorized for this room");
+          return;
+        }
+      } catch (error) {
+        console.error("Authorization check failed:", error);
+        socket.emit("error", "Authorization service unavailable or denied access");
         return;
       }
 
