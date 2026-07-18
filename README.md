@@ -20,6 +20,18 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Configuration
+
+Custom Express + Socket.IO server (`server.js`), not `next start`. Required env vars:
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `CALENDAR_API_URL` | Base URL of the NestWorks calendar backend. Every `join-room` call forwards the caller's session token here (`GET /api/v1/academic/meets/authorize?roomId=`) to verify they're an actual participant before admitting them to the room. | `http://localhost:8080` |
+| `ALLOWED_ORIGIN` | CORS origin allowed to connect to the Socket.IO server. Should be the NestWorks frontend's real domain in prod — `*` is a dev-only fallback. | `*` |
+| `PORT` | HTTP port the server listens on. | `3000` |
+
+There is no meets-specific secret or JWT signing key — the token forwarded to `CALENDAR_API_URL` is the caller's own NestWorks session JWT, verified by the calendar backend's normal auth (Spring Security), not by this service.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
