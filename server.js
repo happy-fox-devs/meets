@@ -9,13 +9,14 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 // Authorization is now handled dynamically via Calendar Service API
+const CALENDAR_API_URL = process.env.CALENDAR_API_URL || "http://localhost:8080";
 
 app.prepare().then(() => {
   const server = express();
   const httpServer = http.createServer(server);
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin: process.env.ALLOWED_ORIGIN || "*",
       methods: ["GET", "POST"],
     },
   });
@@ -26,29 +27,31 @@ app.prepare().then(() => {
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
-    socket.on("join-room", async (roomId, userId, userName) => {
+    socket.on("join-room", async (roomId, userId, token) => {
       // Chain of Responsibility Handler 1: Basic validation
-      if (!userId || !userName) {
+      if (!userId || !token) {
         socket.emit("error", "Invalid user details");
         return;
       }
 
-      // Chain of Responsibility Handler 2: Calendar Service Authorization
+      // Chain of Responsibility Handler 2: Calendar Service Authorization.
+      // The token is the caller's real NestWorks session JWT, forwarded as-is
+      // so the backend's normal Spring Security auth resolves the real user --
+      // no separate meets-specific auth scheme, no userName trusted from the client.
+      let userName;
       try {
-        // Internal HTTP call to calendar-service (assuming it runs on 8080)
-        const response = await fetch(`http://localhost:8080/api/v1/academic/meets/authorize?userId=${userId}&roomId=${roomId}`);
-        if (!response.ok) {
-           throw new Error("Authorization HTTP request failed");
+        const response = await fetch(
+          `${CALENDAR_API_URL}/api/v1/academic/meets/authorize?roomId=${encodeURIComponent(roomId)}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const data = await response.json();
+        if (!response.ok || !data.authorized) {
+          throw new Error(data.error || "Not authorized");
         }
-        
-        const isAuthorized = await response.json();
-        if (!isAuthorized) {
-          socket.emit("error", "User not authorized for this room");
-          return;
-        }
+        userName = data.userName || "Participant";
       } catch (error) {
-        console.error("Authorization check failed:", error);
-        socket.emit("error", "Authorization service unavailable or denied access");
+        console.error("Authorization check failed:", error.message);
+        socket.emit("error", "Not authorized for this room");
         return;
       }
 

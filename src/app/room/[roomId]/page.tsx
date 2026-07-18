@@ -31,6 +31,18 @@ interface Message {
   time: string;
 }
 
+// Decoded client-side for display only -- the server independently verifies
+// the same token's signature before admitting the socket to the room.
+function decodeJwtPayload(token: string): { fullName?: string } | null {
+  try {
+    const payload = token.split(".")[1];
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
 const Video = ({
   stream,
   userName,
@@ -88,7 +100,8 @@ export default function Room() {
   const router = useRouter();
 
   const roomId = params.roomId as string;
-  const userName = searchParams.get("name");
+  const token = searchParams.get("token");
+  const userName = token ? (decodeJwtPayload(token)?.fullName ?? "Participant") : null;
 
   const [peers, setPeers] = useState<PeerRef[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -119,7 +132,7 @@ export default function Room() {
   >(new Map());
 
   useEffect(() => {
-    if (!userName) {
+    if (!token) {
       router.push("/");
       return;
     }
@@ -148,7 +161,7 @@ export default function Room() {
           userVideo.current.srcObject = currentStream;
         }
 
-        socketRx.emit("join-room", roomId, socketRx.id, userName);
+        socketRx.emit("join-room", roomId, socketRx.id, token);
 
         socketRx.on("error", (msg) => {
           alert(msg);
@@ -290,7 +303,7 @@ export default function Room() {
       socketRx.disconnect();
       peersRef.current.forEach((p) => p.peer.destroy());
     };
-  }, [roomId, userName, router]);
+  }, [roomId, token, router]);
 
   // Audio & Video Activity Monitor & Auto-Restart
   useEffect(() => {
