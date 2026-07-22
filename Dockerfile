@@ -2,8 +2,6 @@
 FROM node:24-slim AS base
 WORKDIR /app
 
-ENV NODE_ENV=production
-
 # --- Dependencies ---
 FROM base AS deps
 COPY package.json package-lock.json ./
