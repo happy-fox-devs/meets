@@ -161,7 +161,17 @@ export default function Room() {
           userVideo.current.srcObject = currentStream;
         }
 
-        socketRx.emit("join-room", roomId, socketRx.id, token);
+        // socketRx.id is only assigned once the WS handshake completes; if
+        // getUserMedia() resolves first (e.g. permission already granted),
+        // emitting immediately sends join-room with userId=undefined.
+        const emitJoinRoom = () => {
+          socketRx.emit("join-room", roomId, socketRx.id, token);
+        };
+        if (socketRx.connected) {
+          emitJoinRoom();
+        } else {
+          socketRx.once("connect", emitJoinRoom);
+        }
 
         socketRx.on("error", (msg) => {
           alert(msg);
@@ -305,59 +315,28 @@ export default function Room() {
     };
   }, [roomId, token, router]);
 
-  // Audio & Video Activity Monitor & Auto-Restart
+  // Audio & Video Track Health Monitor & Auto-Restart
   useEffect(() => {
     if (!stream || restartingMode) return;
-
-    // Audio Context Setup
-    let audioContext: AudioContext;
-    let analyser: AnalyserNode;
-    let dataArray: Uint8Array;
-    let bufferLength: number;
-
-    // Only set up audio monitoring if not muted
-    if (!muted) {
-      try {
-        audioContext = new (
-          window.AudioContext || (window as any).webkitAudioContext
-        )();
-        analyser = audioContext.createAnalyser();
-        const microphone = audioContext.createMediaStreamSource(stream);
-        microphone.connect(analyser);
-        analyser.fftSize = 256;
-        bufferLength = analyser.frequencyBinCount;
-        dataArray = new Uint8Array(bufferLength);
-      } catch (e) {
-        console.error("Failed to initialize audio context", e);
-      }
-    }
-
-    let silenceStart = Date.now();
-    const SILENCE_THRESHOLD = 10;
-    const SILENCE_DURATION = 10000;
-
-    // Video State Monitoring
-    let videoCheckInterval: NodeJS.Timeout;
 
     const checkMediaHealth = () => {
       if (restartingMode) return;
 
-      // 1. Check Audio
-      if (!muted && analyser && dataArray) {
-        analyser.getByteFrequencyData(dataArray as any);
-        let sum = 0;
-        for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
-        const average = sum / bufferLength;
-
-        if (average < SILENCE_THRESHOLD) {
-          if (Date.now() - silenceStart > SILENCE_DURATION) {
-            console.warn("Audio silence detected for 10s. Restarting audio...");
-            restartMedia("audio");
-            silenceStart = Date.now();
-            return;
-          }
-        } else {
-          silenceStart = Date.now();
+      // 1. Check Audio -- track health (ended, or muted by the OS/device),
+      // never volume. A participant being quiet is normal: the previous
+      // amplitude-based "10s of silence" heuristic treated that as broken
+      // audio, stopped and re-acquired the live track, and caused a real
+      // audible gap for every quiet listener, repeating every ~10s.
+      if (!muted && stream) {
+        const audioTrack = stream.getAudioTracks()[0];
+        if (audioTrack && (audioTrack.readyState === "ended" || audioTrack.muted)) {
+          console.warn(
+            "Audio track ended or muted unexpectedly. Restarting audio...",
+            audioTrack.readyState,
+            audioTrack.muted,
+          );
+          restartMedia("audio");
+          return;
         }
       }
 
@@ -385,7 +364,6 @@ export default function Room() {
 
     return () => {
       cancelAnimationFrame(animationId);
-      if (audioContext && audioContext.state !== "closed") audioContext.close();
     };
   }, [stream, muted, videoOff, restartingMode]);
 
