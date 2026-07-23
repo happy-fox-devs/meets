@@ -161,7 +161,17 @@ export default function Room() {
           userVideo.current.srcObject = currentStream;
         }
 
-        socketRx.emit("join-room", roomId, socketRx.id, token);
+        // socketRx.id is only assigned once the WS handshake completes; if
+        // getUserMedia() resolves first (e.g. permission already granted),
+        // emitting immediately sends join-room with userId=undefined.
+        const emitJoinRoom = () => {
+          socketRx.emit("join-room", roomId, socketRx.id, token);
+        };
+        if (socketRx.connected) {
+          emitJoinRoom();
+        } else {
+          socketRx.once("connect", emitJoinRoom);
+        }
 
         socketRx.on("error", (msg) => {
           alert(msg);
