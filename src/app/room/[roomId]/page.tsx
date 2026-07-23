@@ -151,6 +151,29 @@ export default function Room() {
     socketRef.current = socketRx;
     setSocket(socketRx);
 
+    // A brief network drop (sleep/wake, WiFi blip) makes socket.io-client
+    // auto-reconnect with a BRAND NEW socket id. The server already dropped
+    // our old room membership when the old transport closed, and every
+    // existing peer connection here was keyed to that old id -- without this,
+    // we never re-emit join-room and the tab becomes a silent zombie that
+    // looks connected but exchanges nothing until a manual refresh.
+    //
+    // This must hook the Socket's own "connect" event, not the Manager's
+    // "reconnect" event -- verified live that "reconnect" fires BEFORE
+    // socket.id is repopulated (same undefined-id race as the initial-join
+    // fix below), while "connect" is exactly the event that fix already
+    // depends on for a populated id. hasJoinedRoom no-ops this handler for
+    // the very first connect, which the getUserMedia-gated flow below owns.
+    let hasJoinedRoom = false;
+    socketRx.on("connect", () => {
+      if (!hasJoinedRoom) return;
+      console.warn("Socket reconnected with a new id -- rejoining room");
+      peersRef.current.forEach((p) => p.peer.destroy());
+      peersRef.current = [];
+      setPeers([]);
+      socketRx.emit("join-room", roomId, socketRx.id, token);
+    });
+
     // Get User Media
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
@@ -165,6 +188,7 @@ export default function Room() {
         // getUserMedia() resolves first (e.g. permission already granted),
         // emitting immediately sends join-room with userId=undefined.
         const emitJoinRoom = () => {
+          hasJoinedRoom = true;
           socketRx.emit("join-room", roomId, socketRx.id, token);
         };
         if (socketRx.connected) {
