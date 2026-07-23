@@ -151,6 +151,20 @@ export default function Room() {
     socketRef.current = socketRx;
     setSocket(socketRx);
 
+    // A brief network drop (sleep/wake, WiFi blip) makes socket.io-client
+    // auto-reconnect with a BRAND NEW socket id. The server already dropped
+    // our old room membership when the old transport closed, and every
+    // existing peer connection here was keyed to that old id -- without this,
+    // we never re-emit join-room and the tab becomes a silent zombie that
+    // looks connected but exchanges nothing until a manual refresh.
+    socketRx.io.on("reconnect", () => {
+      console.warn("Socket reconnected with a new id -- rejoining room");
+      peersRef.current.forEach((p) => p.peer.destroy());
+      peersRef.current = [];
+      setPeers([]);
+      socketRx.emit("join-room", roomId, socketRx.id, token);
+    });
+
     // Get User Media
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
