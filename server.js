@@ -11,6 +11,9 @@ const handle = app.getRequestHandler();
 // Authorization is now handled dynamically via Calendar Service API
 const CALENDAR_API_URL = process.env.CALENDAR_API_URL || "http://localhost:8080";
 
+// Full-mesh WebRTC: cost grows O(n^2) per room, so cap membership.
+const MAX_ROOM_SIZE = parseInt(process.env.MAX_ROOM_SIZE || "8", 10);
+
 app.prepare().then(() => {
   const server = express();
   const httpServer = http.createServer(server);
@@ -19,6 +22,12 @@ app.prepare().then(() => {
       origin: process.env.ALLOWED_ORIGIN || "*",
       methods: ["GET", "POST"],
     },
+  });
+
+  // Dedicated health-check, registered before the Next.js catch-all below so
+  // it never falls through to page routing.
+  server.get("/health", (req, res) => {
+    res.status(200).json({ status: "ok" });
   });
 
   // Socket.IO Logic
@@ -53,6 +62,12 @@ app.prepare().then(() => {
       } catch (error) {
         console.error("Authorization check failed:", error.message);
         socket.emit("error", "Not authorized for this room");
+        return;
+      }
+
+      const currentSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
+      if (currentSize >= MAX_ROOM_SIZE) {
+        socket.emit("error", "This room is full");
         return;
       }
 
@@ -166,4 +181,21 @@ app.prepare().then(() => {
       }
     }
   });
+
+  // Without this, every live call breaks abruptly on deploy: the process is
+  // killed outright instead of letting participants know the server is going
+  // away and closing sockets cleanly.
+  const shutdown = (signal) => {
+    console.log(`> ${signal} received, shutting down gracefully`);
+    io.emit("error", "Server is restarting, please rejoin in a moment.");
+    io.close();
+    httpServer.close(() => {
+      console.log("> HTTP server closed");
+      process.exit(0);
+    });
+    // Force-exit if connections don't drain in time.
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 });
