@@ -23,6 +23,7 @@ app.prepare().then(() => {
 
   // Socket.IO Logic
   const userNames = new Map(); // Store socket.id -> userName mapping
+  const socketRooms = new Map(); // Store socket.id -> roomId mapping (set only after authorize succeeds)
 
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
@@ -57,8 +58,10 @@ app.prepare().then(() => {
 
       console.log(`User ${userName} (${userId}) joined room ${roomId}`);
 
-      // Store userName for this socket
+      // Store userName + room for this socket -- this is what marks the socket
+      // as authorized; every signaling handler below checks it first.
       userNames.set(socket.id, userName);
+      socketRooms.set(socket.id, roomId);
 
       socket.join(roomId);
       // Broadcast to others in the room
@@ -67,14 +70,26 @@ app.prepare().then(() => {
       socket.on("disconnect", () => {
         console.log(`User ${userName} disconnected`);
         socket.to(roomId).emit("user-disconnected", userId);
-        // Clean up userName mapping
+        // Clean up mappings
         userNames.delete(socket.id);
+        socketRooms.delete(socket.id);
       });
     });
+
+    // A socket may only relay signaling once it has completed join-room
+    // authorization, and only to a peer sitting in that same room -- otherwise
+    // any connected socket could forge an SDP offer/answer at a guessed or
+    // previously-seen socket id and hijack another participant's call.
+    function authorizedPeerInSameRoom(socket, targetSocketId) {
+      const room = socketRooms.get(socket.id);
+      if (!room) return false;
+      return socketRooms.get(targetSocketId) === room;
+    }
 
     // Signaling - include userName in events
     socket.on("offer", (data) => {
       // data: { offer, to }
+      if (!authorizedPeerInSameRoom(socket, data.to)) return;
       const senderName = userNames.get(socket.id) || "Participant";
       socket.to(data.to).emit("offer", {
         offer: data.offer,
@@ -85,6 +100,7 @@ app.prepare().then(() => {
 
     socket.on("answer", (data) => {
       // data: { answer, to }
+      if (!authorizedPeerInSameRoom(socket, data.to)) return;
       const senderName = userNames.get(socket.id) || "Participant";
       socket.to(data.to).emit("answer", {
         answer: data.answer,
@@ -95,6 +111,7 @@ app.prepare().then(() => {
 
     socket.on("ice-candidate", (data) => {
       // data: { candidate, to }
+      if (!authorizedPeerInSameRoom(socket, data.to)) return;
       socket
         .to(data.to)
         .emit("ice-candidate", { candidate: data.candidate, from: socket.id });
@@ -102,8 +119,12 @@ app.prepare().then(() => {
 
     // Peer state changes (mute/video toggle)
     socket.on("peer-state-changed", (data) => {
-      // data: { roomId, userId, muted, videoOff }
-      socket.to(data.roomId).emit("peer-state-changed", {
+      // data: { userId, muted, videoOff } -- roomId is the socket's own
+      // authorized room, never the client-supplied one, so a caller can't
+      // spoof state into a room it never joined.
+      const room = socketRooms.get(socket.id);
+      if (!room) return;
+      socket.to(room).emit("peer-state-changed", {
         userId: data.userId,
         muted: data.muted,
         videoOff: data.videoOff,
@@ -111,8 +132,11 @@ app.prepare().then(() => {
     });
 
     // Chat
-    socket.on("send-message", (roomId, message, userName) => {
-      socket.to(roomId).emit("receive-message", {
+    socket.on("send-message", (_roomId, message, _userName) => {
+      const room = socketRooms.get(socket.id);
+      if (!room) return;
+      const userName = userNames.get(socket.id) || "Participant";
+      socket.to(room).emit("receive-message", {
         message,
         userName,
         time: new Date().toLocaleTimeString(),
