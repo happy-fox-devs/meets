@@ -707,7 +707,7 @@ export default function Room() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-screen bg-[#202124] text-white p-8 text-center">
+      <div className="flex items-center justify-center h-dvh bg-[#202124] text-white p-8 text-center">
         <div className="bg-red-900/50 p-8 rounded-2xl border border-red-500/50 max-w-2xl">
           <h1 className="text-2xl font-bold mb-4 text-red-400">
             Connection Error
@@ -747,7 +747,7 @@ export default function Room() {
   }
 
   return (
-    <div className="flex h-screen bg-[#202124] overflow-hidden text-white font-sans">
+    <div className="flex h-dvh bg-[#202124] overflow-hidden text-white font-sans">
       {restartingMode && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-yellow-500/90 text-black px-4 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 animate-pulse">
           {restartingMode === "audio" ? (
@@ -930,14 +930,16 @@ export default function Room() {
 
       {/* Chat Sidebar */}
       {showChat && (
-        <div className="w-80 bg-[#202124] border-l border-[#3c4043] flex flex-col shadow-2xl animate-in slide-in-from-right duration-300">
+        // Full screen on a phone (a 320px side panel left the call ~40px); a side panel from md up.
+        <div className="fixed inset-0 z-40 w-full bg-[#202124] flex flex-col md:static md:inset-auto md:z-auto md:w-80 md:border-l md:border-[#3c4043] md:shadow-2xl animate-in slide-in-from-right duration-300">
           <div className="p-4 border-b border-[#3c4043] flex items-center justify-between">
             <h2 className="font-medium text-lg">In-call messages</h2>
             <button
               onClick={() => setShowChat(false)}
-              className="text-gray-400 hover:text-white"
+              aria-label="Close chat"
+              className="text-gray-400 hover:text-white p-3 -m-3 text-xl leading-none"
             >
-              x
+              ×
             </button>
           </div>
 
