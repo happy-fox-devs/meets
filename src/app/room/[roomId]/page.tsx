@@ -713,6 +713,7 @@ export default function Room() {
             Connection Error
           </h1>
           <p className="mb-6 text-lg">{error}</p>
+          {typeof window !== "undefined" && window.location.protocol !== "https:" ? (
           <div className="bg-black/40 p-4 rounded text-left text-sm font-mono text-gray-300">
             <p className="mb-2 font-bold text-gray-400">
               To fix this in Opera/Chrome:
@@ -735,9 +736,15 @@ export default function Room() {
               <li>Relaunch the browser.</li>
             </ol>
           </div>
+          ) : (
+            <p className="text-sm text-gray-300">
+              Check that your camera and microphone are allowed for this site, then reload the page. If it keeps
+              happening, go back to NestWorks and join again from your booking.
+            </p>
+          )}
           <button
             onClick={() => router.push("/")}
-            className="mt-8 px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded-full transition-colors"
+            className="mt-8 px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-full transition-colors"
           >
             Back to Home
           </button>
@@ -748,6 +755,7 @@ export default function Room() {
 
   return (
     <div className="flex h-dvh bg-[#202124] overflow-hidden text-white font-sans">
+      <h1 className="sr-only">NestWorks video call</h1>
       {restartingMode && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-yellow-500/90 text-black px-4 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 animate-pulse">
           {restartingMode === "audio" ? (

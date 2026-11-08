@@ -25,6 +25,13 @@ export default function Home() {
             token that authorizes you directly.
           </p>
         </div>
+
+        <a
+          href="https://nestworks.app/"
+          className="mt-6 inline-flex min-h-12 items-center justify-center rounded-full bg-blue-600 px-8 font-semibold text-white hover:bg-blue-500"
+        >
+          Back to NestWorks
+        </a>
       </div>
     </div>
   );
