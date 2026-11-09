@@ -774,7 +774,7 @@ export default function Room() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col p-4 min-h-0">
         {/* Video Grid Container */}
-        <div className="flex-1 flex gap-4 min-h-0">
+        <div className="relative flex-1 flex gap-4 min-h-0">
           {/* Main Grid - Other Participants */}
           <div className="flex-1 flex items-center justify-center min-h-0">
             {(() => {
@@ -857,7 +857,9 @@ export default function Room() {
           </div>
 
           {/* Right Sidebar - User Camera + Overflow */}
-          <div className="w-64 flex flex-col gap-3">
+          {/* A 256px side column on a computer. On a phone it was most of the screen (the other person was left with
+              ~106px, a thin strip): there your own camera is a small floating window over the call instead. */}
+          <div className="w-64 flex flex-col gap-3 max-md:absolute max-md:top-2 max-md:right-2 max-md:z-10 max-md:w-28">
             {/* User's Own Camera - Fixed Position */}
             <div className="relative bg-black rounded-xl overflow-hidden shadow-lg border-2 border-blue-500/50 aspect-video">
               <video
@@ -913,24 +915,28 @@ export default function Room() {
         <div className="h-20 mt-4 flex items-center justify-center gap-4">
           <button
             onClick={toggleMute}
+            aria-label={muted ? "Unmute microphone" : "Mute microphone"}
             className={`p-4 rounded-full ${muted ? "bg-red-600 text-white" : "bg-[#3c4043] text-gray-200"} hover:opacity-80 transition-all`}
           >
             {muted ? <MicOff size={24} /> : <Mic size={24} />}
           </button>
           <button
             onClick={toggleVideo}
+            aria-label={videoOff ? "Turn camera on" : "Turn camera off"}
             className={`p-4 rounded-full ${videoOff ? "bg-red-600 text-white" : "bg-[#3c4043] text-gray-200"} hover:opacity-80 transition-all`}
           >
             {videoOff ? <VideoOff size={24} /> : <VideoIcon size={24} />}
           </button>
           <button
             onClick={leaveRoom}
+            aria-label="Leave call"
             className="p-4 rounded-full bg-red-600 text-white hover:bg-red-700 transition-all px-8 flex items-center gap-2"
           >
             <PhoneOff size={24} />
           </button>
           <button
             onClick={() => setShowChat(!showChat)}
+            aria-label={showChat ? "Close in-call chat" : "Open in-call chat"}
             className={`p-4 rounded-full ${showChat ? "bg-blue-600 text-white" : "bg-[#3c4043] text-gray-200"} hover:opacity-80 transition-all`}
           >
             <MessageSquare size={24} />
