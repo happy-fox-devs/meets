@@ -701,8 +701,10 @@ export default function Room() {
     }
   };
 
+  // Hanging up returns to NestWorks itself (its /authorize sends a signed-in person to their own dashboard and anyone else
+  // to the login), not to this service's landing page, which has nothing to do after a call.
   const leaveRoom = () => {
-    router.push("/");
+    window.location.assign(`${process.env.NEXT_PUBLIC_NESTWORKS_URL ?? "https://nestworks.app"}/authorize`);
   };
 
   if (error) {
