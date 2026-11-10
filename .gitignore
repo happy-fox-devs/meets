@@ -44,3 +44,5 @@ next-env.d.ts
 .recall/local/
 .recall/index.json
 .recall/usage.json
+
+.agents/
