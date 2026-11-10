@@ -4,7 +4,7 @@ import { Video, ShieldCheck } from "lucide-react";
 
 export default function Home() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0f1115] overflow-hidden relative">
+    <div className="min-h-dvh flex items-center justify-center bg-[#0f1115] overflow-hidden relative">
       <div className="absolute inset-0 z-0">
          <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-600/10 rounded-full blur-[120px]" />
          <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-purple-600/10 rounded-full blur-[120px]" />
