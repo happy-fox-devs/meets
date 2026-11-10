@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# recall (derived + personal layer)
+.recall/local/
+.recall/index.json
+.recall/usage.json
