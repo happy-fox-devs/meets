@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 import SimplePeer, { Instance as PeerInstance, SignalData } from "simple-peer";
@@ -104,7 +104,7 @@ export default function Room() {
   const userName = token ? (decodeJwtPayload(token)?.fullName ?? "Participant") : null;
 
   const [peers, setPeers] = useState<PeerRef[]>([]);
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [, setSocket] = useState<Socket | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMsg, setInputMsg] = useState("");
@@ -131,6 +131,183 @@ export default function Room() {
     Map<string, { context: AudioContext; analyser: AnalyserNode }>
   >(new Map());
 
+  const restartMedia = useCallback(async (type: "audio" | "video") => {
+    if (restartingMode || !streamRef.current) return;
+    setRestartingMode(type);
+
+    try {
+      const oldTracks =
+        type === "audio"
+          ? streamRef.current.getAudioTracks()
+          : streamRef.current.getVideoTracks();
+
+      oldTracks.forEach((t) => t.stop());
+
+      // Get new stream logic
+      // Note: We request BOTH if possible to ensure we get a fresh coherent stream,
+      // but typically we just need the specific track.
+      // Requesting just one might be faster/simpler.
+      const constraints = type === "audio" ? { audio: true } : { video: true };
+      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      const newTrack =
+        type === "audio"
+          ? newStream.getAudioTracks()[0]
+          : newStream.getVideoTracks()[0];
+
+      // Replace in local stream
+      const currentStream = streamRef.current;
+      if (type === "audio") {
+        const old = currentStream.getAudioTracks()[0];
+        if (old) currentStream.removeTrack(old);
+        currentStream.addTrack(newTrack);
+      } else {
+        const old = currentStream.getVideoTracks()[0];
+        if (old) currentStream.removeTrack(old);
+        currentStream.addTrack(newTrack);
+
+        // Force local video element update if video changed
+        if (userVideo.current) {
+          userVideo.current.srcObject = currentStream;
+          // Important: Trigger play again
+          userVideo.current
+            .play()
+            .catch((e) => console.error("Error playing resized video", e));
+        }
+      }
+
+      // Replace in all peer connections
+      await Promise.all(
+        peersRef.current.map(async (peerObj) => {
+          if (peerObj.peer && !peerObj.peer.destroyed) {
+            try {
+              const oldTrack = oldTracks[0]; // The one we stopped
+              // We need to pass the stream as the 3rd arg to replaceTrack in some versions of simple-peer/webrtc,
+              // but simplest is replaceTrack(old, new, stream)
+              await peerObj.peer.replaceTrack(
+                oldTrack,
+                newTrack,
+                currentStream,
+              );
+            } catch (e) {
+              console.error(
+                `Error replacing ${type} track for peer ${peerObj.peerId}`,
+                e,
+              );
+            }
+          }
+        }),
+      );
+    } catch (err) {
+      console.error(`Failed to restart ${type}:`, err);
+      // Only show fatal error if it's audio, video we might just let slide or show toast
+      if (type === "audio") {
+        setError("Microphone stopped working and could not be restarted.");
+      }
+    } finally {
+      setRestartingMode(null);
+    }
+  }, [restartingMode]);
+
+  function createPeer(
+    userToSignal: string,
+    callerID: string,
+    stream: MediaStream,
+  ) {
+    const peer = new SimplePeer({
+      initiator: true,
+      trickle: true,
+      stream,
+      config: {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:global.stun.twilio.com:3478" },
+        ],
+      },
+    });
+
+    peer.on("signal", (signal) => {
+      if ("candidate" in signal) {
+        socketRef.current?.emit("ice-candidate", {
+          candidate: signal,
+          to: userToSignal,
+        });
+      } else {
+        socketRef.current?.emit("offer", { offer: signal, to: userToSignal });
+      }
+    });
+
+    peer.on("error", (err) => {
+      console.error("Peer connection error (initiator):", err);
+    });
+
+    peer.on("stream", (remoteStream) => {
+      setPeers((prev) =>
+        prev.map((p) => {
+          if (p.peerId === userToSignal) {
+            return { ...p, stream: remoteStream };
+          }
+          return p;
+        }),
+      );
+      // Update ref as well to keep in sync
+      const peerObj = peersRef.current.find((p) => p.peerId === userToSignal);
+      if (peerObj) peerObj.stream = remoteStream;
+    });
+
+    return peer;
+  }
+
+  function addPeer(
+    incomingSignal: SignalData,
+    callerID: string,
+    stream: MediaStream,
+  ) {
+    const peer = new SimplePeer({
+      initiator: false,
+      trickle: true,
+      stream,
+      config: {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:global.stun.twilio.com:3478" },
+        ],
+      },
+    });
+
+    peer.on("signal", (signal) => {
+      if ("candidate" in signal) {
+        socketRef.current?.emit("ice-candidate", {
+          candidate: signal,
+          to: callerID,
+        });
+      } else {
+        socketRef.current?.emit("answer", { answer: signal, to: callerID });
+      }
+    });
+
+    peer.on("error", (err) => {
+      console.error("Peer connection error (receiver):", err);
+    });
+
+    peer.on("stream", (remoteStream) => {
+      setPeers((prev) =>
+        prev.map((p) => {
+          if (p.peerId === callerID) {
+            return { ...p, stream: remoteStream };
+          }
+          return p;
+        }),
+      );
+      const peerObj = peersRef.current.find((p) => p.peerId === callerID);
+      if (peerObj) peerObj.stream = remoteStream;
+    });
+
+    peer.signal(incomingSignal);
+
+    return peer;
+  }
+
   useEffect(() => {
     if (!token) {
       router.push("/");
@@ -139,6 +316,9 @@ export default function Room() {
 
     // Check for Secure Context
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      // Intentional: one-shot capability check on mount; the early return
+      // stops the effect, so there is no cascading render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError(
         "Camera/Microphone access is blocked. This browser requires a secure connection (HTTPS) or localhost to access media devices. If you are on a local network (http://192.168...), you must configure your browser to treat this origin as secure.",
       );
@@ -389,11 +569,15 @@ export default function Room() {
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [stream, muted, videoOff, restartingMode]);
+  }, [stream, muted, videoOff, restartingMode, restartMedia]);
 
   // Audio activity monitoring for peers (speaker-based reordering)
   useEffect(() => {
     if (!peers || peers.length === 0) return;
+
+    // Copy ref values so the cleanup acts on the same Maps it started with.
+    const audioContexts = audioContextsRef.current;
+    const speakingTimers = speakingTimersRef.current;
 
     peers.forEach((peerRef) => {
       if (!peerRef.stream || audioContextsRef.current.has(peerRef.peerId))
@@ -401,7 +585,8 @@ export default function Room() {
 
       try {
         const audioContext = new (
-          window.AudioContext || (window as any).webkitAudioContext
+          window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext })
+            .webkitAudioContext
         )();
         const analyser = audioContext.createAnalyser();
         const microphone = audioContext.createMediaStreamSource(peerRef.stream);
@@ -459,191 +644,14 @@ export default function Room() {
 
     return () => {
       // Cleanup audio contexts when peers change
-      audioContextsRef.current.forEach(({ context }) => {
+      audioContexts.forEach(({ context }) => {
         if (context.state !== "closed") context.close();
       });
-      speakingTimersRef.current.forEach((timer) => clearTimeout(timer));
-      audioContextsRef.current.clear();
-      speakingTimersRef.current.clear();
+      speakingTimers.forEach((timer) => clearTimeout(timer));
+      audioContexts.clear();
+      speakingTimers.clear();
     };
   }, [peers]);
-
-  const restartMedia = async (type: "audio" | "video") => {
-    if (restartingMode || !streamRef.current) return;
-    setRestartingMode(type);
-
-    try {
-      const oldTracks =
-        type === "audio"
-          ? streamRef.current.getAudioTracks()
-          : streamRef.current.getVideoTracks();
-
-      oldTracks.forEach((t) => t.stop());
-
-      // Get new stream logic
-      // Note: We request BOTH if possible to ensure we get a fresh coherent stream,
-      // but typically we just need the specific track.
-      // Requesting just one might be faster/simpler.
-      const constraints = type === "audio" ? { audio: true } : { video: true };
-      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-
-      const newTrack =
-        type === "audio"
-          ? newStream.getAudioTracks()[0]
-          : newStream.getVideoTracks()[0];
-
-      // Replace in local stream
-      const currentStream = streamRef.current;
-      if (type === "audio") {
-        const old = currentStream.getAudioTracks()[0];
-        if (old) currentStream.removeTrack(old);
-        currentStream.addTrack(newTrack);
-      } else {
-        const old = currentStream.getVideoTracks()[0];
-        if (old) currentStream.removeTrack(old);
-        currentStream.addTrack(newTrack);
-
-        // Force local video element update if video changed
-        if (userVideo.current) {
-          userVideo.current.srcObject = currentStream;
-          // Important: Trigger play again
-          userVideo.current
-            .play()
-            .catch((e) => console.error("Error playing resized video", e));
-        }
-      }
-
-      // Replace in all peer connections
-      await Promise.all(
-        peersRef.current.map(async (peerObj) => {
-          if (peerObj.peer && !peerObj.peer.destroyed) {
-            try {
-              const oldTrack = oldTracks[0]; // The one we stopped
-              // We need to pass the stream as the 3rd arg to replaceTrack in some versions of simple-peer/webrtc,
-              // but simplest is replaceTrack(old, new, stream)
-              await peerObj.peer.replaceTrack(
-                oldTrack,
-                newTrack,
-                currentStream,
-              );
-            } catch (e) {
-              console.error(
-                `Error replacing ${type} track for peer ${peerObj.peerId}`,
-                e,
-              );
-            }
-          }
-        }),
-      );
-    } catch (err) {
-      console.error(`Failed to restart ${type}:`, err);
-      // Only show fatal error if it's audio, video we might just let slide or show toast
-      if (type === "audio") {
-        setError("Microphone stopped working and could not be restarted.");
-      }
-    } finally {
-      setRestartingMode(null);
-    }
-  };
-
-  function createPeer(
-    userToSignal: string,
-    callerID: string,
-    stream: MediaStream,
-  ) {
-    const peer = new SimplePeer({
-      initiator: true,
-      trickle: true,
-      stream,
-      config: {
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:global.stun.twilio.com:3478" },
-        ],
-      },
-    });
-
-    peer.on("signal", (signal) => {
-      if ("candidate" in signal) {
-        socketRef.current?.emit("ice-candidate", {
-          candidate: signal,
-          to: userToSignal,
-        });
-      } else {
-        socketRef.current?.emit("offer", { offer: signal, to: userToSignal });
-      }
-    });
-
-    peer.on("error", (err) => {
-      console.error("Peer connection error (initiator):", err);
-    });
-
-    peer.on("stream", (remoteStream) => {
-      setPeers((prev) =>
-        prev.map((p) => {
-          if (p.peerId === userToSignal) {
-            return { ...p, stream: remoteStream };
-          }
-          return p;
-        }),
-      );
-      // Update ref as well to keep in sync
-      const peerObj = peersRef.current.find((p) => p.peerId === userToSignal);
-      if (peerObj) peerObj.stream = remoteStream;
-    });
-
-    return peer;
-  }
-
-  function addPeer(
-    incomingSignal: SignalData,
-    callerID: string,
-    stream: MediaStream,
-  ) {
-    const peer = new SimplePeer({
-      initiator: false,
-      trickle: true,
-      stream,
-      config: {
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:global.stun.twilio.com:3478" },
-        ],
-      },
-    });
-
-    peer.on("signal", (signal) => {
-      if ("candidate" in signal) {
-        socketRef.current?.emit("ice-candidate", {
-          candidate: signal,
-          to: callerID,
-        });
-      } else {
-        socketRef.current?.emit("answer", { answer: signal, to: callerID });
-      }
-    });
-
-    peer.on("error", (err) => {
-      console.error("Peer connection error (receiver):", err);
-    });
-
-    peer.on("stream", (remoteStream) => {
-      setPeers((prev) =>
-        prev.map((p) => {
-          if (p.peerId === callerID) {
-            return { ...p, stream: remoteStream };
-          }
-          return p;
-        }),
-      );
-      const peerObj = peersRef.current.find((p) => p.peerId === callerID);
-      if (peerObj) peerObj.stream = remoteStream;
-    });
-
-    peer.signal(incomingSignal);
-
-    return peer;
-  }
 
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
