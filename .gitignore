@@ -46,3 +46,4 @@ next-env.d.ts
 .recall/usage.json
 
 .agents/
+.claude/
