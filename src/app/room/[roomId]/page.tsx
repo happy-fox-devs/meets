@@ -116,6 +116,11 @@ export default function Room() {
   >(null);
 
   const socketRef = useRef<Socket | null>(null);
+  // Handed out by the server when it admits us to the room. The access token in the URL only lives 1h, so a reconnect later in
+  // the call proves who we are with this instead (see rejoin-tickets.js on the server). Kept in memory, never in the URL.
+  const roomTicketRef = useRef<string | null>(null);
+  // Set once leave-room has been sent (hang-up button, pagehide or a server error), so the three paths never double-fire.
+  const leftRoomRef = useRef(false);
   const userVideo = useRef<HTMLVideoElement>(null);
   const peersRef = useRef<PeerRef[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
@@ -329,6 +334,9 @@ export default function Room() {
     const socketRx = io();
 
     socketRef.current = socketRx;
+    socketRx.on("room-session", (ticket: string) => {
+      roomTicketRef.current = ticket;
+    });
     setSocket(socketRx);
 
     // A brief network drop (sleep/wake, WiFi blip) makes socket.io-client
@@ -351,7 +359,13 @@ export default function Room() {
       peersRef.current.forEach((p) => p.peer.destroy());
       peersRef.current = [];
       setPeers([]);
-      socketRx.emit("join-room", roomId, socketRx.id, token);
+      socketRx.emit(
+        "join-room",
+        roomId,
+        socketRx.id,
+        token,
+        roomTicketRef.current ?? undefined,
+      );
     });
 
     // Get User Media
@@ -378,6 +392,11 @@ export default function Room() {
         }
 
         socketRx.on("error", (msg) => {
+          // Best effort: if the server had already admitted this socket, its rejoin ticket should not outlive the page.
+          if (!leftRoomRef.current && socketRx.connected) {
+            leftRoomRef.current = true;
+            socketRx.emit("leave-room");
+          }
           alert(msg);
           router.push("/");
         });
@@ -518,6 +537,20 @@ export default function Room() {
       peersRef.current.forEach((p) => p.peer.destroy());
     };
   }, [roomId, token, router]);
+
+  // Closing the tab / navigating away: tell the server so it revokes this call's rejoin ticket instead of leaving it to expire.
+  // Best effort and fire-and-forget (no ack wait: the page is going away); the hang-up button sets the same flag first.
+  useEffect(() => {
+    const onPageHide = () => {
+      const socketNow = socketRef.current;
+      if (leftRoomRef.current || !socketNow?.connected) return;
+      leftRoomRef.current = true;
+      roomTicketRef.current = null;
+      socketNow.emit("leave-room");
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
 
   // Audio & Video Track Health Monitor & Auto-Restart
   useEffect(() => {
@@ -711,8 +744,25 @@ export default function Room() {
 
   // Hanging up returns to NestWorks itself (its /authorize sends a signed-in person to their own dashboard and anyone else
   // to the login), not to this service's landing page, which has nothing to do after a call.
+  // Tells the server first so it revokes this call's rejoin ticket (it is a credential and must not outlive the call); waits for the
+  // ack, but never longer than a moment, so a dead connection cannot trap the person in the room.
   const leaveRoom = () => {
-    window.location.assign(`${process.env.NEXT_PUBLIC_NESTWORKS_URL ?? "https://nestworks.app"}/authorize`);
+    const destination = `${process.env.NEXT_PUBLIC_NESTWORKS_URL ?? "https://nestworks.app"}/authorize`;
+    const socketNow = socketRef.current;
+    roomTicketRef.current = null;
+    if (!socketNow?.connected) {
+      window.location.assign(destination);
+      return;
+    }
+    leftRoomRef.current = true; // pagehide fires on the navigation below: it must not send a second leave-room
+    let navigated = false;
+    const go = () => {
+      if (navigated) return;
+      navigated = true;
+      window.location.assign(destination);
+    };
+    socketNow.emit("leave-room", go);
+    setTimeout(go, 800);
   };
 
   if (error) {

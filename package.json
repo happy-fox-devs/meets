@@ -1,12 +1,13 @@
 {
   "name": "prograde-disk",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "scripts": {
     "dev": "node --max-old-space-size=4096 server.js",
     "build": "next build",
     "start": "node --max-old-space-size=4096 server.js",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.18",
