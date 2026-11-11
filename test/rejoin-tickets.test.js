@@ -112,8 +112,8 @@ describe("positiveMsFromEnv", () => {
     }
   });
 
-  it("defaults are 8h absolute and 10 min grace", () => {
-    assert.equal(DEFAULT_TTL_MS, 8 * 3600_000);
+  it("defaults are 3h absolute and 10 min grace", () => {
+    assert.equal(DEFAULT_TTL_MS, 3 * 3600_000);
     assert.equal(DEFAULT_GRACE_MS, 10 * 60_000);
   });
 });

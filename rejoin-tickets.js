@@ -12,7 +12,7 @@
 // socket that holds it is gone it only survives a grace window (enough for a network blip), never the full absolute maximum.
 const crypto = require("crypto");
 
-const DEFAULT_TTL_MS = 8 * 60 * 60 * 1000; // absolute maximum life of a ticket
+const DEFAULT_TTL_MS = 3 * 60 * 60 * 1000; // absolute maximum life of a ticket
 const DEFAULT_GRACE_MS = 10 * 60 * 1000; // life left once the socket holding it has gone
 
 /** Reads a duration from an env value: it must be a finite number > 0, anything else (unset, "abc", 0, -5, Infinity) is the default. */

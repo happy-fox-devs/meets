@@ -17,7 +17,7 @@ const CALENDAR_API_URL = process.env.CALENDAR_API_URL || "http://localhost:8080"
 const MAX_ROOM_SIZE = parseInt(process.env.MAX_ROOM_SIZE || "8", 10);
 
 // The access token that lets someone into a room lives 1h, shorter than a call can run. See rejoin-tickets.js.
-// REJOIN_TICKET_TTL_MS: absolute maximum life of a ticket (default 8h). REJOIN_GRACE_MS: how long a ticket survives once the socket
+// REJOIN_TICKET_TTL_MS: absolute maximum life of a ticket (default 3h). REJOIN_GRACE_MS: how long a ticket survives once the socket
 // holding it is gone (default 10 min). Both must be a finite number > 0, otherwise the default applies.
 const rejoinTickets = createTicketStore({
   ttlMs: positiveMsFromEnv(process.env.REJOIN_TICKET_TTL_MS, DEFAULT_TTL_MS),
