@@ -1,6 +1,7 @@
 "use client";
 
 import { Video, ShieldCheck } from "lucide-react";
+import { NESTWORKS_EXIT_URL } from "@/lib/nestworks";
 
 export default function Home() {
   return (
@@ -27,7 +28,7 @@ export default function Home() {
         </div>
 
         <a
-          href="https://nestworks.app/"
+          href={NESTWORKS_EXIT_URL}
           className="mt-6 inline-flex min-h-12 items-center justify-center rounded-full bg-blue-600 px-8 font-semibold text-white hover:bg-blue-500"
         >
           Back to NestWorks

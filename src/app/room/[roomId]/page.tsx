@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { io, Socket } from "socket.io-client";
+import { NESTWORKS_EXIT_URL } from "@/lib/nestworks";
 import SimplePeer, { Instance as PeerInstance, SignalData } from "simple-peer";
 import {
   Mic,
@@ -97,7 +98,6 @@ const Video = ({
 export default function Room() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const router = useRouter();
 
   const roomId = params.roomId as string;
   const token = searchParams.get("token");
@@ -315,7 +315,7 @@ export default function Room() {
 
   useEffect(() => {
     if (!token) {
-      router.push("/");
+      window.location.replace(NESTWORKS_EXIT_URL);
       return;
     }
 
@@ -398,7 +398,7 @@ export default function Room() {
             socketRx.emit("leave-room");
           }
           alert(msg);
-          router.push("/");
+          window.location.assign(NESTWORKS_EXIT_URL);
         });
 
         socketRx.on(
@@ -536,7 +536,7 @@ export default function Room() {
       socketRx.disconnect();
       peersRef.current.forEach((p) => p.peer.destroy());
     };
-  }, [roomId, token, router]);
+  }, [roomId, token]);
 
   // Closing the tab / navigating away: tell the server so it revokes this call's rejoin ticket instead of leaving it to expire.
   // Best effort and fire-and-forget (no ack wait: the page is going away); the hang-up button sets the same flag first.
@@ -747,7 +747,7 @@ export default function Room() {
   // Tells the server first so it revokes this call's rejoin ticket (it is a credential and must not outlive the call); waits for the
   // ack, but never longer than a moment, so a dead connection cannot trap the person in the room.
   const leaveRoom = () => {
-    const destination = `${process.env.NEXT_PUBLIC_NESTWORKS_URL ?? "https://nestworks.app"}/authorize`;
+    const destination = NESTWORKS_EXIT_URL;
     const socketNow = socketRef.current;
     roomTicketRef.current = null;
     if (!socketNow?.connected) {
@@ -803,10 +803,10 @@ export default function Room() {
             </p>
           )}
           <button
-            onClick={() => router.push("/")}
+            onClick={() => window.location.assign(NESTWORKS_EXIT_URL)}
             className="mt-8 px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-full transition-colors"
           >
-            Back to Home
+            Back to NestWorks
           </button>
         </div>
       </div>
